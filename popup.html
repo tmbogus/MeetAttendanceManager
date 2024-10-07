@@ -1,0 +1,91 @@
+<!-- popup.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Meet Admin Overlay</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      width: 300px;
+      padding: 10px;
+    }
+    h2 {
+      font-size: 16px;
+      margin-bottom: 10px;
+    }
+    .user-list {
+      max-height: 200px;
+      overflow-y: auto;
+      margin-bottom: 10px;
+    }
+    .user-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 5px 0;
+      border-bottom: 1px solid #ddd;
+    }
+    .user-item:last-child {
+      border-bottom: none;
+    }
+    .remove-button {
+      background-color: #e74c3c;
+      color: #fff;
+      border: none;
+      padding: 2px 5px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .remove-button:hover {
+      background-color: #c0392b;
+    }
+    .add-user {
+      display: flex;
+      margin-bottom: 10px;
+    }
+    .add-user input {
+      flex: 1;
+      padding: 5px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 3px;
+    }
+    .add-user button {
+      margin-left: 5px;
+      padding: 5px 10px;
+      font-size: 14px;
+      border: none;
+      border-radius: 3px;
+      background-color: #2ecc71;
+      color: #fff;
+      cursor: pointer;
+    }
+    .add-user button:hover {
+      background-color: #27ae60;
+    }
+  </style>
+</head>
+<body>
+  <h2>Ban Users</h2>
+  <div class="add-user">
+    <input type="text" id="ban-username" placeholder="Enter username">
+    <button id="ban-add">Add</button>
+  </div>
+  <div class="user-list" id="banned-users">
+    <!-- Banned users will be listed here -->
+  </div>
+
+  <h2>Allow Users</h2>
+  <div class="add-user">
+    <input type="text" id="allow-username" placeholder="Enter username">
+    <button id="allow-add">Add</button>
+  </div>
+  <div class="user-list" id="allowed-users">
+    <!-- Allowed users will be listed here -->
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

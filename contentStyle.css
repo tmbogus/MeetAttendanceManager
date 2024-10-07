@@ -1,0 +1,62 @@
+/* contentStyle.css */
+
+/* Status Indicator Styles */
+.status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  
+  /* Ban Button Styles */
+  .ban-button {
+    background-color: #e74c3c;
+    color: #fff;
+    border: none;
+    padding: 2px 5px;
+    margin-left: 5px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  
+  .ban-button:hover {
+    background-color: #c0392b;
+  }
+  
+  /* Allow Button Styles */
+  .allow-button {
+    background-color: #2ecc71;
+    color: #fff;
+    border: none;
+    padding: 2px 5px;
+    margin-left: 5px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  
+  .allow-button:hover {
+    background-color: #27ae60;
+  }
+  
+  /* Admin Notification Styles */
+  .admin-notification {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    background-color: #ffdddd;
+    color: #a94442;
+    padding: 10px;
+    border: 1px solid #a94442;
+    border-radius: 5px;
+    z-index: 10000; /* Ensures it's on top */
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    font-family: Arial, sans-serif;
+  }
+  
+  /* Optional: Hide default Google Meet elements if needed */
+  /* .some-google-meet-class {
+       display: none;
+  } */
+  
