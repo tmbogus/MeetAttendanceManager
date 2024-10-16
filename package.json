@@ -1,0 +1,19 @@
+{
+  "name": "MeetAttendanceManager",
+  "version": "1.0.0",
+  "description": "Enhances Google Meet's moderation capabilities with a real-time attendance overlay.",
+  "main": "background.js",
+  "scripts": {
+    "lint": "eslint .",
+    "test": "echo \"No tests specified\" && exit 0",
+    "build": "echo \"Build process not defined yet\""
+  },
+  "author": "Your Name",
+  "license": "MIT",
+  "devDependencies": {
+    "eslint": "^7.32.0",
+    "prettier": "^2.3.2",
+    "eslint-config-prettier": "^8.3.0",
+    "eslint-plugin-prettier": "^3.4.0"
+  }
+}
