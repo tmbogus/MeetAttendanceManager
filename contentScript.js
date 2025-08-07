@@ -1,178 +1,276 @@
 // contentScript.js
 
-// Utility function to get user status from storage
-function getUserStatus(username, callback) {
-    chrome.storage.local.get(['bannedUsers', 'allowedUsers'], (result) => {
-      const { bannedUsers = [], allowedUsers = [] } = result;
-      if (bannedUsers.includes(username)) {
-        callback('banned');
-      } else if (allowedUsers.includes(username)) {
-        callback('allowed');
-      } else {
-        callback('neutral');
+(function () {
+  if (window.__meetAdminInitialized) return;
+  window.__meetAdminInitialized = true;
+
+  const EXT_ATTRIBUTE = 'data-meet-admin-enhanced';
+  const BUTTON_CLASS_BAN = 'ban-button';
+  const BUTTON_CLASS_ALLOW = 'allow-button';
+  const INDICATOR_CLASS = 'status-indicator';
+  const TOAST_CONTAINER_CLASS = 'admin-toast-container';
+
+  let extensionEnabled = true;
+  let mutationObserver = null;
+  let scheduledRefreshId = null;
+
+  // Potential selectors for participant list and entries (best-effort, resilient to minor changes)
+  const ATTENDANCE_ROOT_SELECTORS = [
+    '.a-D-Ja',
+    '[role="list"]',
+    '[data-panel-id="bbbYaf"]', // sometimes used for people panel
+  ];
+
+  const PARTICIPANT_ENTRY_SELECTORS = [
+    '.ZjFb7c',
+    '[role="listitem"]',
+  ];
+
+  const USERNAME_SELECTORS = [
+    '.ZjFb7c',
+    '[data-self-name]',
+    '[aria-label]'
+  ];
+
+  function debounceRefresh(delayMs = 150) {
+    if (scheduledRefreshId) {
+      clearTimeout(scheduledRefreshId);
+      scheduledRefreshId = null;
+    }
+    scheduledRefreshId = setTimeout(() => {
+      scheduledRefreshId = null;
+      refreshUI();
+    }, delayMs);
+  }
+
+  function getAttendanceRoot() {
+    for (const selector of ATTENDANCE_ROOT_SELECTORS) {
+      const el = document.querySelector(selector);
+      if (el) return el;
+    }
+    return null;
+  }
+
+  function getParticipants(root) {
+    if (!root) return [];
+    let entries = [];
+    for (const selector of PARTICIPANT_ENTRY_SELECTORS) {
+      entries = root.querySelectorAll(selector);
+      if (entries && entries.length) break;
+    }
+    return Array.from(entries);
+  }
+
+  function extractUsername(participantEl) {
+    // Try known selectors, then fallback to trimmed text
+    for (const selector of USERNAME_SELECTORS) {
+      const el = participantEl.querySelector(selector);
+      if (el && el.textContent) {
+        const name = el.textContent.trim();
+        if (name) return name;
       }
+      if (el && el.getAttribute) {
+        const aria = el.getAttribute('aria-label');
+        if (aria) return aria.trim();
+      }
+    }
+    const text = participantEl.textContent || '';
+    return text.split('\n')[0].trim() || 'Unknown';
+  }
+
+  function ensureToastContainer() {
+    let container = document.querySelector(`.${TOAST_CONTAINER_CLASS}`);
+    if (!container) {
+      container = document.createElement('div');
+      container.className = TOAST_CONTAINER_CLASS;
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function showToast(message, type = 'info', durationMs = 2500) {
+    const container = ensureToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `admin-toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-4px)';
+      setTimeout(() => toast.remove(), 250);
+    }, durationMs);
+  }
+
+  function getLists() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['bannedUsers', 'allowedUsers'], (result) => {
+        resolve({
+          bannedUsers: result.bannedUsers || [],
+          allowedUsers: result.allowedUsers || [],
+        });
+      });
     });
   }
-  
-  // Function to add status indicators and action buttons
-  function addStatusIndicators() {
-    // Replace with the actual selector for the attendance list
-    const attendanceList = document.querySelector('.a-D-Ja'); // Example selector
-  
-    if (attendanceList) {
-      // Replace with the actual selector for participant entries
-      const participants = attendanceList.querySelectorAll('.ZjFb7c'); // Example selector
-  
-      participants.forEach(participant => {
-        // Avoid adding indicators and buttons multiple times
-        if (!participant.querySelector('.status-indicator')) {
-          const usernameElement = participant.querySelector('.ZjFb7c'); // Replace with actual selector
-          const username = usernameElement ? usernameElement.textContent.trim() : 'Unknown';
-  
-          // Create status indicator
-          const statusIndicator = document.createElement('span');
-          statusIndicator.className = 'status-indicator';
-          statusIndicator.style.marginLeft = '8px';
-  
-          // Determine user status
-          getUserStatus(username, (status) => {
-            switch (status) {
-              case 'banned':
-                statusIndicator.style.backgroundColor = 'red';
-                break;
-              case 'allowed':
-                statusIndicator.style.backgroundColor = 'green';
-                break;
-              default:
-                statusIndicator.style.backgroundColor = 'yellow';
-            }
-          });
-  
-          participant.appendChild(statusIndicator);
-  
-          // Add Ban and Allow buttons
-          addActionButtons(participant, username);
-        }
+
+  function getExtensionEnabled() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['extensionEnabled'], (result) => {
+        resolve(typeof result.extensionEnabled === 'boolean' ? result.extensionEnabled : true);
       });
-    }
+    });
   }
-  
-  // Function to add Ban and Allow buttons
-  function addActionButtons(participant, username) {
-    // Create Ban button
+
+  function setUserStatus(username, nextStatus) {
+    // Ensure mutual exclusivity between lists
+    chrome.storage.local.get(['bannedUsers', 'allowedUsers'], (result) => {
+      let banned = result.bannedUsers || [];
+      let allowed = result.allowedUsers || [];
+
+      banned = banned.filter((u) => u !== username);
+      allowed = allowed.filter((u) => u !== username);
+
+      if (nextStatus === 'banned') banned.push(username);
+      if (nextStatus === 'allowed') allowed.push(username);
+
+      chrome.storage.local.set({ bannedUsers: banned, allowedUsers: allowed }, () => {
+        showToast(`"${username}" marked as ${nextStatus}`, nextStatus === 'banned' ? 'error' : nextStatus === 'allowed' ? 'success' : 'info');
+      });
+    });
+  }
+
+  function computeStatus(username, lists) {
+    if (lists.bannedUsers.includes(username)) return 'banned';
+    if (lists.allowedUsers.includes(username)) return 'allowed';
+    return 'neutral';
+  }
+
+  function removeInjectedUI() {
+    document.querySelectorAll(`[${EXT_ATTRIBUTE}="1"]`).forEach((el) => {
+      el.remove();
+    });
+  }
+
+  function addActionButtons(container, username) {
     const banButton = document.createElement('button');
     banButton.textContent = 'Ban';
-    banButton.className = 'ban-button';
-    banButton.style.marginLeft = '5px';
-    banButton.style.padding = '2px 5px';
-    banButton.style.fontSize = '12px';
-    banButton.style.cursor = 'pointer';
-    banButton.style.backgroundColor = '#e74c3c';
-    banButton.style.color = '#fff';
-    banButton.style.border = 'none';
-    banButton.style.borderRadius = '3px';
-  
-    banButton.addEventListener('click', () => {
-      banUser(username);
-      updateStatusIndicator(username, 'banned');
-      alert(`User "${username}" has been banned successfully.`);
+    banButton.className = BUTTON_CLASS_BAN;
+    banButton.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setUserStatus(username, 'banned');
     });
-  
-    // Create Allow button
+
     const allowButton = document.createElement('button');
     allowButton.textContent = 'Allow';
-    allowButton.className = 'allow-button';
-    allowButton.style.marginLeft = '5px';
-    allowButton.style.padding = '2px 5px';
-    allowButton.style.fontSize = '12px';
-    allowButton.style.cursor = 'pointer';
-    allowButton.style.backgroundColor = '#2ecc71';
-    allowButton.style.color = '#fff';
-    allowButton.style.border = 'none';
-    allowButton.style.borderRadius = '3px';
-  
-    allowButton.addEventListener('click', () => {
-      allowUser(username);
-      updateStatusIndicator(username, 'allowed');
-      alert(`User "${username}" has been allowed successfully.`);
+    allowButton.className = BUTTON_CLASS_ALLOW;
+    allowButton.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setUserStatus(username, 'allowed');
     });
-  
-    participant.appendChild(banButton);
-    participant.appendChild(allowButton);
+
+    container.appendChild(banButton);
+    container.appendChild(allowButton);
   }
-  
-  // Function to ban a user
-  function banUser(username) {
-    chrome.storage.local.get(['bannedUsers'], (result) => {
-      const banned = result.bannedUsers || [];
-      if (!banned.includes(username)) {
-        banned.push(username);
-        chrome.storage.local.set({ bannedUsers: banned }, () => {
-          console.log(`User "${username}" has been banned.`);
-          // Optionally, implement logic to remove the user from the meeting
-        });
-      }
-    });
-  }
-  
-  // Function to allow a user
-  function allowUser(username) {
-    chrome.storage.local.get(['allowedUsers'], (result) => {
-      const allowed = result.allowedUsers || [];
-      if (!allowed.includes(username)) {
-        allowed.push(username);
-        chrome.storage.local.set({ allowedUsers: allowed }, () => {
-          console.log(`User "${username}" has been allowed.`);
-          // Optionally, implement logic to re-enable user access
-        });
-      }
-    });
-  }
-  
-  // Function to update the status indicator's color
-  function updateStatusIndicator(username, status) {
-    // Replace with the actual selector for the attendance list
-    const attendanceList = document.querySelector('.a-D-Ja'); // Example selector
-  
-    if (attendanceList) {
-      // Replace with the actual selector for participant entries
-      const participants = attendanceList.querySelectorAll('.ZjFb7c'); // Example selector
-  
-      participants.forEach(participant => {
-        const usernameElement = participant.querySelector('.ZjFb7c'); // Replace with actual selector
-        const currentUsername = usernameElement ? usernameElement.textContent.trim() : 'Unknown';
-  
-        if (currentUsername === username) {
-          const indicator = participant.querySelector('.status-indicator');
-          if (indicator) {
-            switch (status) {
-              case 'banned':
-                indicator.style.backgroundColor = 'red';
-                break;
-              case 'allowed':
-                indicator.style.backgroundColor = 'green';
-                break;
-              default:
-                indicator.style.backgroundColor = 'yellow';
-            }
-          }
-        }
-      });
+
+  function ensureEnhancements(participantEl, username, status) {
+    // Create a small inline container to hold indicator and buttons
+    let uiContainer = participantEl.querySelector(`[${EXT_ATTRIBUTE}="1"]`);
+    if (!uiContainer) {
+      uiContainer = document.createElement('span');
+      uiContainer.setAttribute(EXT_ATTRIBUTE, '1');
+      uiContainer.style.marginLeft = '8px';
+      uiContainer.style.display = 'inline-flex';
+      uiContainer.style.alignItems = 'center';
+
+      const indicator = document.createElement('span');
+      indicator.className = INDICATOR_CLASS;
+      uiContainer.appendChild(indicator);
+
+      addActionButtons(uiContainer, username);
+
+      participantEl.appendChild(uiContainer);
+    }
+
+    const indicator = uiContainer.querySelector(`.${INDICATOR_CLASS}`);
+    if (indicator) {
+      indicator.style.backgroundColor = status === 'banned' ? 'red' : status === 'allowed' ? 'green' : 'yellow';
+      indicator.title = `Status: ${status}`;
     }
   }
-  
-  // Initial injection of indicators and buttons
-  addStatusIndicators();
-  
-  // Observe DOM changes to update indicators and buttons in real-time
-  const observer = new MutationObserver((mutations) => {
-    mutations.forEach((mutation) => {
-      if (mutation.type === 'childList') {
-        addStatusIndicators();
+
+  async function refreshUI() {
+    if (!extensionEnabled) {
+      removeInjectedUI();
+      return;
+    }
+
+    const root = getAttendanceRoot();
+    if (!root) return;
+
+    const lists = await getLists();
+    const participants = getParticipants(root);
+
+    for (const el of participants) {
+      // Avoid enhancing non-user tiles by requiring some text
+      const username = extractUsername(el);
+      if (!username || username === 'Unknown') continue;
+      ensureEnhancements(el, username, computeStatus(username, lists));
+    }
+  }
+
+  function startObserving() {
+    if (mutationObserver) return;
+    mutationObserver = new MutationObserver(() => debounceRefresh(200));
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function stopObserving() {
+    if (mutationObserver) {
+      mutationObserver.disconnect();
+      mutationObserver = null;
+    }
+  }
+
+  async function init() {
+    extensionEnabled = await getExtensionEnabled();
+    if (extensionEnabled) startObserving();
+    debounceRefresh(0);
+  }
+
+  // Listen for storage changes (banned/allowed lists or enable toggle)
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== 'local') return;
+    if (changes.extensionEnabled) {
+      extensionEnabled = changes.extensionEnabled.newValue;
+      if (!extensionEnabled) {
+        stopObserving();
+        removeInjectedUI();
+        showToast('Meet Admin Overlay disabled', 'info');
+      } else {
+        startObserving();
+        debounceRefresh(0);
+        showToast('Meet Admin Overlay enabled', 'success');
       }
-    });
+      return;
+    }
+    if (changes.bannedUsers || changes.allowedUsers) {
+      debounceRefresh(50);
+    }
   });
-  
-  // Start observing the body for changes
-  observer.observe(document.body, { childList: true, subtree: true });
+
+  // Also react to runtime messages from background (redundant but harmless)
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (msg && msg.type === 'EXTENSION_STATE_CHANGED') {
+      extensionEnabled = !!msg.enabled;
+      if (!extensionEnabled) {
+        stopObserving();
+        removeInjectedUI();
+      } else {
+        startObserving();
+        debounceRefresh(0);
+      }
+    }
+  });
+
+  init();
+})();
   

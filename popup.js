@@ -1,170 +1,169 @@
 // popup.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    const banAddButton = document.getElementById('ban-add');
-    const banUsernameInput = document.getElementById('ban-username');
-    const bannedUsersContainer = document.getElementById('banned-users');
-  
-    const allowAddButton = document.getElementById('allow-add');
-    const allowUsernameInput = document.getElementById('allow-username');
-    const allowedUsersContainer = document.getElementById('allowed-users');
-  
-    // Load and display banned users
-    function loadBannedUsers() {
-      chrome.storage.local.get(['bannedUsers'], (result) => {
-        const banned = result.bannedUsers || [];
-        bannedUsersContainer.innerHTML = '';
-        banned.forEach(user => {
-          const userItem = document.createElement('div');
-          userItem.className = 'user-item';
-          userItem.textContent = user;
-  
-          const removeBtn = document.createElement('button');
-          removeBtn.className = 'remove-button';
-          removeBtn.textContent = 'Remove';
-          removeBtn.addEventListener('click', () => {
-            removeUser('bannedUsers', user);
-          });
-  
-          userItem.appendChild(removeBtn);
-          bannedUsersContainer.appendChild(userItem);
-        });
-      });
-    }
-  
-    // Load and display allowed users
-    function loadAllowedUsers() {
-      chrome.storage.local.get(['allowedUsers'], (result) => {
-        const allowed = result.allowedUsers || [];
-        allowedUsersContainer.innerHTML = '';
-        allowed.forEach(user => {
-          const userItem = document.createElement('div');
-          userItem.className = 'user-item';
-          userItem.textContent = user;
-  
-          const removeBtn = document.createElement('button');
-          removeBtn.className = 'remove-button';
-          removeBtn.textContent = 'Remove';
-          removeBtn.addEventListener('click', () => {
-            removeUser('allowedUsers', user);
-          });
-  
-          userItem.appendChild(removeBtn);
-          allowedUsersContainer.appendChild(userItem);
-        });
-      });
-    }
-  
-    // Add user to the specified list
-    function addUser(listKey, username) {
-      if (!username) return;
-      chrome.storage.local.get([listKey], (result) => {
-        const list = result[listKey] || [];
-        if (!list.includes(username)) {
-          list.push(username);
-          chrome.storage.local.set({ [listKey]: list }, () => {
-            if (listKey === 'bannedUsers') {
-              loadBannedUsers();
-              // Update status indicators in the active tab
-              updateStatusInTab(username, 'banned');
-            } else if (listKey === 'allowedUsers') {
-              loadAllowedUsers();
-              // Update status indicators in the active tab
-              updateStatusInTab(username, 'allowed');
-            }
-          });
-        }
-      });
-    }
-  
-    // Remove user from the specified list
-    function removeUser(listKey, username) {
-      chrome.storage.local.get([listKey], (result) => {
-        let list = result[listKey] || [];
-        list = list.filter(user => user !== username);
-        chrome.storage.local.set({ [listKey]: list }, () => {
-          if (listKey === 'bannedUsers') {
-            loadBannedUsers();
-            // Update status indicators in the active tab
-            updateStatusInTab(username, 'neutral');
-          } else if (listKey === 'allowedUsers') {
-            loadAllowedUsers();
-            // Update status indicators in the active tab
-            updateStatusInTab(username, 'neutral');
-          }
-        });
-      });
-    }
-  
-    // Update status indicators in the active tab
-    function updateStatusInTab(username, status) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        const activeTab = tabs[0];
-        if (activeTab && activeTab.url.startsWith("https://meet.google.com/")) {
-          chrome.scripting.executeScript({
-            target: { tabId: activeTab.id },
-            func: updateStatusIndicatorInPage,
-            args: [username, status]
-          })
-          .then(() => {
-            console.log(`Status for "${username}" updated to "${status}".`);
-          })
-          .catch(err => console.error('Status update injection failed:', err));
-        }
-      });
-    }
-  
-    // Function to be injected into the page to update status indicators
-    function updateStatusIndicatorInPage(username, status) {
-      // Replace with the actual selector for the attendance list
-      const attendanceList = document.querySelector('.a-D-Ja'); // Example selector
-  
-      if (attendanceList) {
-        // Replace with the actual selector for participant entries
-        const participants = attendanceList.querySelectorAll('.ZjFb7c'); // Example selector
-  
-        participants.forEach(participant => {
-          const usernameElement = participant.querySelector('.ZjFb7c'); // Replace with actual selector
-          const currentUsername = usernameElement ? usernameElement.textContent.trim() : 'Unknown';
-  
-          if (currentUsername === username) {
-            const indicator = participant.querySelector('.status-indicator');
-            if (indicator) {
-              switch (status) {
-                case 'banned':
-                  indicator.style.backgroundColor = 'red';
-                  break;
-                case 'allowed':
-                  indicator.style.backgroundColor = 'green';
-                  break;
-                default:
-                  indicator.style.backgroundColor = 'yellow';
-              }
-            }
-          }
-        });
-      }
-    }
-  
-    // Event listeners for adding users
-    banAddButton.addEventListener('click', () => {
-      const username = banUsernameInput.value.trim();
-      if (username) {
-        addUser('bannedUsers', username);
-        banUsernameInput.value = '';
-      }
-    });
-  
-    allowAddButton.addEventListener('click', () => {
-      const username = allowUsernameInput.value.trim();
-      if (username) {
-        addUser('allowedUsers', username);
-        allowUsernameInput.value = '';
-      }
-    });
-  
-    // Initial load of users
-    loadBannedUsers();
-    loadAllowedUsers();
+  const toggleEnabled = document.getElementById('toggle-enabled');
+  const exportBtn = document.getElementById('export-data');
+  const importBtn = document.getElementById('import-data');
+  const importFile = document.getElementById('import-file');
+
+  const banAddButton = document.getElementById('ban-add');
+  const banUsernameInput = document.getElementById('ban-username');
+  const bannedUsersContainer = document.getElementById('banned-users');
+
+  const allowAddButton = document.getElementById('allow-add');
+  const allowUsernameInput = document.getElementById('allow-username');
+  const allowedUsersContainer = document.getElementById('allowed-users');
+
+  function unique(list) {
+    return Array.from(new Set(list.filter(Boolean).map((s) => s.trim()).filter(Boolean)));
+  }
+
+  // Load initial state
+  chrome.storage.local.get(['bannedUsers', 'allowedUsers', 'extensionEnabled'], (result) => {
+    const banned = unique(result.bannedUsers || []);
+    const allowed = unique(result.allowedUsers || []);
+    const enabled = typeof result.extensionEnabled === 'boolean' ? result.extensionEnabled : true;
+
+    toggleEnabled.checked = enabled;
+
+    renderList('bannedUsers', banned, bannedUsersContainer);
+    renderList('allowedUsers', allowed, allowedUsersContainer);
   });
+
+  // Render list helper
+  function renderList(listKey, list, container) {
+    container.innerHTML = '';
+    list.forEach((user) => {
+      const userItem = document.createElement('div');
+      userItem.className = 'user-item';
+
+      const label = document.createElement('span');
+      label.textContent = user;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'remove-button';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', () => removeUser(listKey, user));
+
+      userItem.appendChild(label);
+      userItem.appendChild(removeBtn);
+      container.appendChild(userItem);
+    });
+  }
+
+  // Add user to the specified list, ensuring exclusivity
+  function addUser(listKey, username) {
+    const clean = (username || '').trim();
+    if (!clean) return;
+
+    chrome.storage.local.get(['bannedUsers', 'allowedUsers'], (result) => {
+      let banned = unique(result.bannedUsers || []);
+      let allowed = unique(result.allowedUsers || []);
+
+      banned = banned.filter((u) => u !== clean);
+      allowed = allowed.filter((u) => u !== clean);
+
+      if (listKey === 'bannedUsers') banned.push(clean);
+      if (listKey === 'allowedUsers') allowed.push(clean);
+
+      chrome.storage.local.set({ bannedUsers: unique(banned), allowedUsers: unique(allowed) }, () => {
+        if (listKey === 'bannedUsers') {
+          renderList('bannedUsers', banned, bannedUsersContainer);
+          updateStatusInTab(clean, 'banned');
+        } else {
+          renderList('allowedUsers', allowed, allowedUsersContainer);
+          updateStatusInTab(clean, 'allowed');
+        }
+      });
+    });
+  }
+
+  // Remove user from the specified list
+  function removeUser(listKey, username) {
+    chrome.storage.local.get([listKey], (result) => {
+      let list = unique(result[listKey] || []);
+      list = list.filter((user) => user !== username);
+      chrome.storage.local.set({ [listKey]: list }, () => {
+        if (listKey === 'bannedUsers') {
+          renderList('bannedUsers', list, bannedUsersContainer);
+          updateStatusInTab(username, 'neutral');
+        } else if (listKey === 'allowedUsers') {
+          renderList('allowedUsers', list, allowedUsersContainer);
+          updateStatusInTab(username, 'neutral');
+        }
+      });
+    });
+  }
+
+  // Update status indicators in the active tab (best-effort)
+  function updateStatusInTab(username, status) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTab = tabs[0];
+      if (!activeTab || !activeTab.url || !activeTab.url.startsWith('https://meet.google.com/')) return;
+      chrome.tabs.sendMessage(activeTab.id, { type: 'STATUS_UPDATE', username, status });
+    });
+  }
+
+  // Toggle enable state
+  toggleEnabled.addEventListener('change', () => {
+    chrome.storage.local.set({ extensionEnabled: !!toggleEnabled.checked });
+  });
+
+  // Import/export
+  exportBtn.addEventListener('click', () => {
+    chrome.storage.local.get(['bannedUsers', 'allowedUsers'], (result) => {
+      const payload = {
+        bannedUsers: unique(result.bannedUsers || []),
+        allowedUsers: unique(result.allowedUsers || []),
+        exportedAt: new Date().toISOString(),
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'meet-admin-overlay-export.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  });
+
+  importBtn.addEventListener('click', () => importFile.click());
+  importFile.addEventListener('change', (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result || '{}'));
+        const banned = unique(Array.isArray(data.bannedUsers) ? data.bannedUsers : []);
+        const allowed = unique(Array.isArray(data.allowedUsers) ? data.allowedUsers : []);
+        chrome.storage.local.set({ bannedUsers: banned, allowedUsers: allowed }, () => {
+          renderList('bannedUsers', banned, bannedUsersContainer);
+          renderList('allowedUsers', allowed, allowedUsersContainer);
+        });
+      } catch (err) {
+        console.error('Failed to import list:', err);
+      }
+    };
+    reader.readAsText(file);
+    importFile.value = '';
+  });
+
+  // Event listeners for adding users
+  banAddButton.addEventListener('click', () => {
+    const username = banUsernameInput.value.trim();
+    if (username) {
+      addUser('bannedUsers', username);
+      banUsernameInput.value = '';
+    }
+  });
+
+  allowAddButton.addEventListener('click', () => {
+    const username = allowUsernameInput.value.trim();
+    if (username) {
+      addUser('allowedUsers', username);
+      allowUsernameInput.value = '';
+    }
+  });
+});
   
